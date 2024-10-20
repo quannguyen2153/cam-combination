@@ -28,3 +28,35 @@ def find_layer_predicate_recursive(model, predicate):
             result.append(layer)
         result.extend(find_layer_predicate_recursive(layer, predicate))
     return result
+
+def find_layer(model, target_layer_name):
+    """Find target layer to calculate CAM.
+
+        : Args:
+            - **model - **: Self-defined model architecture.
+            - **target_layer_name - ** (str): Name of target class.
+
+        : Return:
+            - **target_layer - **: Found layer. This layer will be hooked to get forward/backward pass information.
+    """
+    
+    target_layer = model
+    layer_names = target_layer_name.split('.')
+
+    for name in layer_names:
+        if isinstance(target_layer, list):
+            try:
+                name = int(name)
+            except ValueError:
+                raise Exception(f"Expected an index in list but got {name} instead.")
+            
+            if name >= len(target_layer):
+                raise IndexError(f"Index {name} out of range for layer list.")
+            
+            target_layer = target_layer[name]
+        else:
+            if not hasattr(target_layer, name):
+                raise Exception(f"Invalid target layer name: {target_layer_name}")
+            target_layer = getattr(target_layer, name)
+    
+    return target_layer
