@@ -28,14 +28,16 @@ def combine_by_weight(grayscales: List[np.ndarray], weights: List[float]) -> np.
 
     return combination
 
-def combine_by_matching_important_pixels(grayscales: List[np.ndarray], threshold: float) -> np.ndarray:
+def combine_by_matching_important_pixels(grayscales: List[np.ndarray], thresholds: List[float]) -> np.ndarray:
+    if len(grayscales) != len(thresholds):
+        raise ValueError("length of grayscales and thresholds must be equal")
     shape = grayscales[0].shape
     for grayscale in grayscales:
         if grayscale.shape != shape:
             raise ValueError("shape of all grayscales must be the same")
         
     filtered_grayscales = []
-    for grayscale in grayscales:
+    for grayscale, threshold in zip(grayscales, thresholds):
         filtered_grayscales.append(filter_grayscale(grayscale=grayscale, threshold=threshold))
 
     combination = np.zeros_like(filtered_grayscales[0])
