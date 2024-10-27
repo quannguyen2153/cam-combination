@@ -2,3 +2,4 @@ from pytorch_grad_cam.utils.image import deprocess_image
 from pytorch_grad_cam.utils.svd_on_activations import get_2d_projection
 from pytorch_grad_cam.utils import model_targets
 from pytorch_grad_cam.utils import reshape_transforms
+from pytorch_grad_cam.utils.cam_combination import filter_grayscale, combine_by_weight, combine_by_matching_important_pixels
