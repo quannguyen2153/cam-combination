@@ -47,9 +47,9 @@ class PerturbationConfidenceMetric:
             result = scores_after_imputation
 
         if return_visualization:
-            return result, perturbated_tensors
+            return result, scores, perturbated_tensors
         else:
-            return result
+            return result, scores
 
 
 class RemoveMostRelevantFirst:
