@@ -23,9 +23,9 @@ class DropInConfidence(CamMultImageConfidenceChange):
         super(DropInConfidence, self).__init__()
 
     def __call__(self, *args, **kwargs):
-        scores = super(DropInConfidence, self).__call__(*args, **kwargs)
+        scores, bef_score = super(DropInConfidence, self).__call__(*args, **kwargs)
         scores = -scores
-        return np.maximum(scores, 0)
+        return np.maximum(scores, 0) / bef_score * 100
 
 
 class IncreaseInConfidence(CamMultImageConfidenceChange):
