@@ -38,7 +38,10 @@ def combine_by_matching_important_pixels(grayscales: List[np.ndarray], threshold
         
     filtered_grayscales = []
     for grayscale, threshold in zip(grayscales, thresholds):
-        filtered_grayscales.append(filter_grayscale(grayscale=grayscale, threshold=threshold))
+        filtered_grayscale = grayscale.copy()
+        percentile_value = np.percentile(filtered_grayscale, threshold)
+        filtered_grayscale[filtered_grayscale < percentile_value] = 0
+        filtered_grayscales.append(filtered_grayscale)
 
     combination = np.zeros_like(filtered_grayscales[0])
 
