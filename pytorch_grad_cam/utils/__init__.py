@@ -4,3 +4,4 @@ from pytorch_grad_cam.utils import model_targets
 from pytorch_grad_cam.utils import reshape_transforms
 from pytorch_grad_cam.utils.cam_combination import filter_grayscale, combine_by_weight, combine_by_matching_important_pixels
 from pytorch_grad_cam.utils.pertubation_confidence_metric import PerturbationConfidenceMetric, CamMultImageConfidenceChange, DropInConfidence, IncreaseInConfidence
+from pytorch_grad_cam.utils.energy_based_pointing_game import energy_point_game
