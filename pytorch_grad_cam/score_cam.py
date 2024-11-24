@@ -48,7 +48,7 @@ class ScoreCAM(BaseCAM):
             for target, tensor in zip(targets, input_tensors):
                 for i in tqdm.tqdm(range(0, tensor.size(0), BATCH_SIZE)):
                     batch = tensor[i: i + BATCH_SIZE, :]
-                    outputs = [target(o).cpu().item()
+                    outputs = [target(o).to(self.device).item()
                                for o in self.model(batch)]
                     scores.extend(outputs)
             scores = torch.Tensor(scores)
