@@ -12,6 +12,7 @@ from pytorch_grad_cam.eigen_grad_cam import EigenGradCAM
 from pytorch_grad_cam.kpca_cam import KPCA_CAM
 from pytorch_grad_cam.random_cam import RandomCAM
 from pytorch_grad_cam.fullgrad_cam import FullGrad
+from pytorch_grad_cam.grad_score_cam import GradScoreCAM
 from pytorch_grad_cam.guided_backprop import GuidedBackpropReLUModel
 from pytorch_grad_cam.activations_and_gradients import ActivationsAndGradients
 from pytorch_grad_cam.feature_factorization.deep_feature_factorization import DeepFeatureFactorization, run_dff_on_image
