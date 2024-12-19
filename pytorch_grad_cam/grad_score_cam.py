@@ -66,5 +66,8 @@ class GradScoreCAM(BaseCAM):
                 batch_scores = torch.cat(batch_scores, dim=0)
                 scores[batch_idx][mask[batch_idx]] = batch_scores
 
-            weights = torch.nn.Softmax(dim=-1)(scores).cpu().numpy()
-            return weights
+            score_cam_weights = torch.nn.Softmax(dim=-1)(scores).cpu().numpy()
+            
+            combined_weights = np.maximum(score_cam_weights, grad_cam_weights)
+
+            return combined_weights
