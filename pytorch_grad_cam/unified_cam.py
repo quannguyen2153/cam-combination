@@ -20,6 +20,7 @@ class UnifiedCAM(BaseCAM):
         grads: torch.Tensor,
         eigen_smooth: bool = False,
     ) -> np.ndarray:
+        # Calculate filtering weights using GradCAM++ approach
         grads_power_2 = grads**2
         grads_power_3 = grads_power_2 * grads
         # Equation 19 in https://arxiv.org/abs/1710.11063
@@ -38,18 +39,22 @@ class UnifiedCAM(BaseCAM):
 
         with torch.no_grad():
             # Filter activations using the mask
-            filtered_activations = torch.tensor(np.stack([
+            filtered_activations = np.stack([
                 activations[batch_idx][mask[batch_idx]] for batch_idx in range(activations.shape[0])
-            ])).to(self.device)
+            ])
 
-            # Normalize and filter grads
-            normalized_grads = torch.nn.Softmax(dim=-1)(torch.from_numpy(grads)).cpu().numpy()
-            filtered_grads = torch.tensor(np.stack([
-                normalized_grads[batch_idx][mask[batch_idx]] for batch_idx in range(normalized_grads.shape[0])
-            ])).to(self.device)
+            # Filter and normalize grads
+            filtered_grads = np.stack([
+                grads[batch_idx][mask[batch_idx]] for batch_idx in range(grads.shape[0])
+            ])
+            eps = 1e-7
+            sum_activations = np.sum(filtered_activations, axis=(2, 3))
+            normalized_grads = torch.nn.Softmax(dim=-1)(torch.from_numpy(filtered_grads * filtered_activations / (sum_activations[:, :, None, None] + eps))).to(self.device)
 
-            modified_activations = filtered_activations * filtered_grads
+            # Highlight important pixels in each activation
+            modified_activations = torch.from_numpy(filtered_activations).to(self.device) * normalized_grads
 
+            # Upsample and normalize activations
             upsample = torch.nn.UpsamplingBilinear2d(size=input_tensor.shape[-2:])
             upsampled = upsample(modified_activations)
 
@@ -61,6 +66,7 @@ class UnifiedCAM(BaseCAM):
             maxs, mins = maxs[:, :, None, None], mins[:, :, None, None]
             upsampled = (upsampled - mins) / (maxs - mins + 1e-8)
 
+            # Pertubate input with each activation
             input_tensors = input_tensor[:, None,
                                             :, :] * upsampled[:, :, None, :, :]
 
@@ -69,6 +75,7 @@ class UnifiedCAM(BaseCAM):
             else:
                 BATCH_SIZE = 16
 
+            # Calculate score of each pertubated inputs
             scores = []
             for target, tensor in zip(targets, input_tensors):
                 for i in tqdm.tqdm(range(0, tensor.size(0), BATCH_SIZE)):
@@ -80,6 +87,7 @@ class UnifiedCAM(BaseCAM):
             scores = scores.view(modified_activations.shape[0], modified_activations.shape[1])
             weights = torch.nn.Softmax(dim=-1)(scores).numpy()
 
+            # Aggregate activations to saliency map
             modified_activations = modified_activations.cpu().numpy()
 
             # 2D conv
