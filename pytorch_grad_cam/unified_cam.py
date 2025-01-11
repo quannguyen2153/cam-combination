@@ -51,8 +51,20 @@ class UnifiedCAM(BaseCAM):
             sum_activations = np.sum(filtered_activations, axis=(2, 3))
             normalized_grads = torch.nn.Softmax(dim=-1)(torch.from_numpy(filtered_grads * filtered_activations / (sum_activations[:, :, None, None] + eps))).to(self.device)
 
+            # Filter and normalize biases
+            biases = target_layer.bias
+            filtered_biases = []
+            for batch_idx in range(mask.shape[0]):
+                filtered_biases.append(biases[mask[batch_idx]])
+            filtered_biases = torch.stack(filtered_biases)
+
+            min_biases = filtered_biases.min(dim=-1, keepdim=True)[0]
+            max_biases = filtered_biases.max(dim=-1, keepdim=True)[0]
+            normalized_biases = (filtered_biases - min_biases) / (max_biases - min_biases + 1e-8)
+            normalized_biases = normalized_biases[:, :, None, None]
+
             # Highlight important pixels in each activation
-            modified_activations = torch.from_numpy(filtered_activations).to(self.device) * normalized_grads
+            modified_activations = torch.from_numpy(filtered_activations).to(self.device) * normalized_grads * normalized_biases
 
             # Upsample and normalize activations
             upsample = torch.nn.UpsamplingBilinear2d(size=input_tensor.shape[-2:])
