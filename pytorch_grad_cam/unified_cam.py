@@ -35,10 +35,6 @@ class UnifiedCAM(BaseCAM):
         self.outputs = outputs = self.activations_and_grads(input_tensor)
         self.activations_and_grads.release() # Release hooks to avoid accumulating memory size when computing
 
-        if targets is None:
-            target_categories = np.argmax(outputs.cpu().data.numpy(), axis=-1)
-            targets = [ClassifierOutputTarget(category) for category in target_categories]
-
         if self.uses_gradients:
             self.model.zero_grad()
             loss = sum([target(output) for target, output in zip(targets, outputs)])
