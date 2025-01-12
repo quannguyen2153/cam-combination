@@ -3,13 +3,37 @@ import numpy as np
 import torch
 import tqdm
 from pytorch_grad_cam.base_cam import BaseCAM
+from pytorch_grad_cam.utils.find_layers import find_layer_predicate_recursive
 from pytorch_grad_cam.utils.svd_on_activations import get_2d_projection
 
 class UnifiedCAM(BaseCAM):
     def __init__(self, model, target_layers,
                  reshape_transform=None):
-        super(UnifiedCAM, self).__init__(model, target_layers,
-                                              reshape_transform)
+        if not isinstance(target_layers, list) or len(target_layers) <= 0:
+            print("INFO: All bias layers will be used")
+
+            def layer_with_2D_bias(layer):
+                bias_target_layers = [torch.nn.Conv2d, torch.nn.BatchNorm2d]
+                if type(layer) in bias_target_layers and layer.bias is not None:
+                    return True
+                return False
+            
+            target_layers = find_layer_predicate_recursive(
+                model, layer_with_2D_bias)
+            
+            print(f"{len(target_layers)} bias layers will be accounted for.")
+
+        super(UnifiedCAM, self).__init__(model, target_layers, reshape_transform)
+        
+    def get_bias_data(self, layer):
+        # Borrowed from official paper impl:
+        # https://github.com/idiap/fullgrad-saliency/blob/master/saliency/tensor_extractor.py#L47
+        if isinstance(layer, torch.nn.BatchNorm2d):
+            bias = - (layer.running_mean * layer.weight
+                      / torch.sqrt(layer.running_var + layer.eps)) + layer.bias
+            return bias
+        else:
+            return layer.bias
         
     def get_cam_image(
         self,
@@ -52,7 +76,7 @@ class UnifiedCAM(BaseCAM):
             normalized_grads = torch.nn.Softmax(dim=-1)(torch.from_numpy(filtered_grads * filtered_activations / (sum_activations[:, :, None, None] + eps))).to(self.device)
 
             # Filter and normalize biases
-            biases = target_layer.bias
+            biases = self.get_bias_data(target_layer)
             filtered_biases = []
             for batch_idx in range(mask.shape[0]):
                 filtered_biases.append(biases[mask[batch_idx]])
