@@ -7,8 +7,7 @@ from pytorch_grad_cam.utils.find_layers import find_layer_predicate_recursive
 from pytorch_grad_cam.utils.svd_on_activations import get_2d_projection
 
 class UnifiedCAM(BaseCAM):
-    def __init__(self, model, target_layers,
-                 reshape_transform=None):
+    def __init__(self, model, target_layers, reshape_transform=None):
         if not isinstance(target_layers, list) or len(target_layers) <= 0:
             print("INFO: All bias layers will be used")
 
@@ -49,11 +48,8 @@ class UnifiedCAM(BaseCAM):
         return self.aggregate_multi_layers(cam_per_layer)
         
     def get_bias_data(self, layer):
-        # Borrowed from official paper impl:
-        # https://github.com/idiap/fullgrad-saliency/blob/master/saliency/tensor_extractor.py#L47
         if isinstance(layer, torch.nn.BatchNorm2d):
-            bias = - (layer.running_mean * layer.weight
-                      / torch.sqrt(layer.running_var + layer.eps)) + layer.bias
+            bias = - (layer.running_mean * layer.weight / torch.sqrt(layer.running_var + layer.eps)) + layer.bias
             return bias
         else:
             return layer.bias
@@ -99,16 +95,22 @@ class UnifiedCAM(BaseCAM):
             normalized_grads = torch.nn.Softmax(dim=-1)(torch.from_numpy(filtered_grads * filtered_activations / (sum_activations[:, :, None, None] + eps))).to(self.device)
 
             # Filter and normalize biases
-            biases = self.get_bias_data(target_layer)
-            filtered_biases = []
-            for batch_idx in range(mask.shape[0]):
-                filtered_biases.append(biases[mask[batch_idx]])
-            filtered_biases = torch.stack(filtered_biases)
+            try:
+                biases = self.get_bias_data(target_layer)
 
-            min_biases = filtered_biases.min(dim=-1, keepdim=True)[0]
-            max_biases = filtered_biases.max(dim=-1, keepdim=True)[0]
-            normalized_biases = (filtered_biases - min_biases) / (max_biases - min_biases + 1e-8)
-            normalized_biases = normalized_biases[:, :, None, None]
+                filtered_biases = []
+                for batch_idx in range(mask.shape[0]):
+                    filtered_biases.append(biases[mask[batch_idx]])
+                filtered_biases = torch.stack(filtered_biases)
+
+                min_biases = filtered_biases.min(dim=-1, keepdim=True)[0]
+                max_biases = filtered_biases.max(dim=-1, keepdim=True)[0]
+                normalized_biases = (filtered_biases - min_biases) / (max_biases - min_biases + 1e-8)
+                normalized_biases = normalized_biases[:, :, None, None]
+
+            except:
+                # If the layer doesn't have bias
+                normalized_biases = torch.ones(filtered_activations.shape, device=self.device)
 
             # Highlight important pixels in each activation
             modified_activations = torch.from_numpy(filtered_activations).to(self.device) * normalized_grads * normalized_biases
