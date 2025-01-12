@@ -24,6 +24,29 @@ class UnifiedCAM(BaseCAM):
             print(f"{len(target_layers)} bias layers will be accounted for.")
 
         super(UnifiedCAM, self).__init__(model, target_layers, reshape_transform)
+
+    def forward(
+        self, input_tensor: torch.Tensor, targets: List[torch.nn.Module], eigen_smooth: bool = False
+    ) -> np.ndarray:
+        input_tensor = input_tensor.to(self.device)
+
+        if self.compute_input_gradient:
+            input_tensor = torch.autograd.Variable(input_tensor, requires_grad=True)
+
+        self.outputs = outputs = self.activations_and_grads(input_tensor)
+        self.activations_and_grads.release() # Release hooks to avoid accumulating memory size when computing
+
+        if targets is None:
+            target_categories = np.argmax(outputs.cpu().data.numpy(), axis=-1)
+            targets = [ClassifierOutputTarget(category) for category in target_categories]
+
+        if self.uses_gradients:
+            self.model.zero_grad()
+            loss = sum([target(output) for target, output in zip(targets, outputs)])
+            loss.backward(retain_graph=True)
+
+        cam_per_layer = self.compute_cam_per_layer(input_tensor, targets, eigen_smooth)
+        return self.aggregate_multi_layers(cam_per_layer)
         
     def get_bias_data(self, layer):
         # Borrowed from official paper impl:
