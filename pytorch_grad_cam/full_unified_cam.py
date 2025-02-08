@@ -4,53 +4,10 @@ import torch
 import tqdm
 from pytorch_grad_cam.base_cam import BaseCAM
 from pytorch_grad_cam.utils.find_layers import find_layer_predicate_recursive
-from pytorch_grad_cam.utils.image import scale_accross_batch_and_channels, scale_cam_image
+from pytorch_grad_cam.utils.image import scale_accross_batch_and_channels
 from pytorch_grad_cam.utils.svd_on_activations import get_2d_projection
 
 class FullUnifiedCAM(BaseCAM):
-    class Helper:
-        def get_layer_mask(
-            activations: np.ndarray,
-            layer_grads: np.ndarray,
-        ) -> np.ndarray:
-            # Calculate filtering weights using GradCAM++ approach
-            grads_power_2 = layer_grads**2
-            grads_power_3 = grads_power_2 * layer_grads
-            # Equation 19 in https://arxiv.org/abs/1710.11063
-            sum_activations = np.sum(activations, axis=(2, 3))
-            eps = 0.000001
-            aij = grads_power_2 / (2 * grads_power_2 +
-                                sum_activations[:, :, None, None] * grads_power_3 + eps)
-            # Now bring back the ReLU from eq.7 in the paper,
-            # And zero out aijs where the activations are 0
-            aij = np.where(layer_grads != 0, aij, 0)
-
-            grad_cam_weights = np.maximum(layer_grads, 0) * aij
-            grad_cam_weights = np.sum(grad_cam_weights, axis=(2, 3))
-
-            mask = grad_cam_weights > 0
-
-            return mask
-        
-        def get_bias_data(layer):
-            if isinstance(layer, torch.nn.BatchNorm2d):
-                bias = - (layer.running_mean * layer.weight / torch.sqrt(layer.running_var + layer.eps)) + layer.bias
-                return bias
-            else:
-                return layer.bias
-            
-        # Don't know why using this function to normalize cause the result to be worse
-        def normalize_feature_maps_minmax(feature_maps: torch.Tensor) -> torch.Tensor:
-            maxs = feature_maps.view(feature_maps.size(0),
-                                    feature_maps.size(1), -1).max(dim=-1)[0]
-            mins = feature_maps.view(feature_maps.size(0),
-                                    feature_maps.size(1), -1).min(dim=-1)[0]
-
-            maxs, mins = maxs[:, :, None, None], mins[:, :, None, None]
-            feature_maps = (feature_maps - mins) / (maxs - mins + 1e-8)
-
-            return feature_maps
-
     def __init__(self, model, target_layers, reshape_transform=None):
         if not isinstance(target_layers, list) or len(target_layers) <= 0:
             def layer_with_2D_bias(layer):
@@ -70,9 +27,6 @@ class FullUnifiedCAM(BaseCAM):
     ) -> np.ndarray:
         input_tensor = input_tensor.to(self.device)
 
-        if self.compute_input_gradient:
-            input_tensor = torch.autograd.Variable(input_tensor, requires_grad=True)
-
         self.outputs = outputs = self.activations_and_grads(input_tensor)
         self.activations_and_grads.release() # Release hooks to avoid accumulating memory size when computing
 
@@ -89,67 +43,52 @@ class FullUnifiedCAM(BaseCAM):
         input_tensor: torch.Tensor,
         target_layer: torch.nn.Module,
         targets: List[torch.nn.Module],
-        activations: torch.Tensor,
-        layer_grads: torch.Tensor,
+        activations: np.ndarray,
+        layer_grads: np.ndarray,
         eigen_smooth: bool = False,
     ) -> np.ndarray:
-        mask = self.Helper.get_layer_mask(activations=activations, layer_grads=layer_grads)
+        eps = 1e-8
 
         with torch.no_grad():
-            # Filter activations using the mask
-            filtered_activations = np.stack([
-                activations[batch_idx][mask[batch_idx]] for batch_idx in range(activations.shape[0])
-            ])
+            # Compute pixel_weights
+            sum_activations = np.sum(activations, axis=(2, 3))
+            pixel_weights = torch.nn.Softmax(dim=-1)(torch.from_numpy(layer_grads * activations / (sum_activations[:, :, None, None] + eps))).to(self.device)
+            
+            # Highlight important pixels in each activation
+            modified_activations = pixel_weights * torch.from_numpy(activations).to(self.device)
 
-            # Filter and normalize layer grads
-            filtered_layer_grads = np.stack([
-                layer_grads[batch_idx][mask[batch_idx]] for batch_idx in range(layer_grads.shape[0])
-            ])
-            eps = 1e-7
-            sum_activations = np.sum(filtered_activations, axis=(2, 3))
-            pixel_weights = torch.nn.Softmax(dim=-1)(torch.from_numpy(filtered_layer_grads * filtered_activations / (sum_activations[:, :, None, None] + eps))).to(self.device)
+            # Upsample activations
+            upsample = torch.nn.UpsamplingBilinear2d(size=input_tensor.shape[-2:])
+            activation_feature_maps = upsample(modified_activations)
 
-            # Filter and normalize biases
+            # Extract biases
             try:
-                biases = self.Helper.get_bias_data(target_layer)
-
-                filtered_biases = []
-                for batch_idx in range(mask.shape[0]):
-                    filtered_biases.append(biases[mask[batch_idx]])
-                filtered_biases = torch.stack(filtered_biases)[:, :, None, None]
+                if isinstance(target_layer, torch.nn.BatchNorm2d):
+                    biases = - (target_layer.running_mean * target_layer.weight / torch.sqrt(target_layer.running_var + target_layer.eps)) + target_layer.bias
+                else:
+                    biases = target_layer.bias
+                    
+                biases = biases[None, :, None, None]
 
             except:
                 # If the layer doesn't have bias
-                filtered_biases = torch.zeros(filtered_activations.shape, device=self.device)
-
-            # Highlight important pixels in each activation
-            modified_activations = pixel_weights * torch.from_numpy(filtered_activations).to(self.device)
-
-            # Upsample and normalize activations
-            upsample = torch.nn.UpsamplingBilinear2d(size=input_tensor.shape[-2:])
-            activation_feature_maps = upsample(modified_activations)
-            maxs = activation_feature_maps.view(activation_feature_maps.size(0),
-                                    activation_feature_maps.size(1), -1).max(dim=-1)[0]
-            mins = activation_feature_maps.view(activation_feature_maps.size(0),
-                                    activation_feature_maps.size(1), -1).min(dim=-1)[0]
-
-            maxs, mins = maxs[:, :, None, None], mins[:, :, None, None]
-            activation_feature_maps = (activation_feature_maps - mins) / (maxs - mins + 1e-8)
+                biases = torch.zeros(activations.shape, device=self.device)
 
             # Compute bias feature maps
-            gradient_multiplied_biases = np.abs(filtered_biases.cpu().numpy() * filtered_layer_grads)
+            gradient_multiplied_biases = np.abs(biases.cpu().numpy() * layer_grads)
             bias_feature_maps = torch.from_numpy(scale_accross_batch_and_channels(gradient_multiplied_biases, self.get_target_width_height(input_tensor))).to(self.device)
-            maxs = bias_feature_maps.view(bias_feature_maps.size(0),
-                                    bias_feature_maps.size(1), -1).max(dim=-1)[0]
-            mins = bias_feature_maps.view(bias_feature_maps.size(0),
-                                    bias_feature_maps.size(1), -1).min(dim=-1)[0]
-
-            maxs, mins = maxs[:, :, None, None], mins[:, :, None, None]
-            bias_feature_maps = (bias_feature_maps - mins) / (maxs - mins + 1e-8)
-
 
             # Concantenate feature maps
             feature_maps = torch.cat([activation_feature_maps, bias_feature_maps], dim=1)
+
+            # Normalize feature maps
+            maxs = feature_maps.view(feature_maps.size(0),
+                                    feature_maps.size(1), -1).max(dim=-1)[0]
+            mins = feature_maps.view(feature_maps.size(0),
+                                    feature_maps.size(1), -1).min(dim=-1)[0]
+
+            maxs, mins = maxs[:, :, None, None], mins[:, :, None, None]
+            feature_maps = (feature_maps - mins) / (maxs - mins + eps)
 
             # Pertubate input with feature maps
             pertubated_inputs = input_tensor[:, None, :, :] * feature_maps[:, :, None, :, :]
@@ -188,9 +127,3 @@ class FullUnifiedCAM(BaseCAM):
             else:
                 cam = weighted_activations.sum(axis=1)
             return cam
-
-    def aggregate_multi_layers(self, cam_per_target_layer: np.ndarray) -> np.ndarray:
-        cam_per_target_layer = np.concatenate(cam_per_target_layer, axis=1)
-        cam_per_target_layer = np.maximum(cam_per_target_layer, 0)
-        result = np.mean(cam_per_target_layer, axis=1)
-        return scale_cam_image(result)
