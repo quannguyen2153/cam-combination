@@ -21,7 +21,7 @@ def preprocess_image(
     ])
     return preprocessing(img.copy()).unsqueeze(0)
 
-
+# Visualize feature maps
 def deprocess_image(img):
     """ see https://github.com/jacobgil/keras-grad-cam/blob/master/grad-cam.py#L65 """
     img = img - np.mean(img)
@@ -30,6 +30,15 @@ def deprocess_image(img):
     img = img + 0.5
     img = np.clip(img, 0, 1)
     return np.uint8(img * 255)
+
+
+# Visualize image after preprocessing
+def denormalize(img_np, mean, std):
+    """Undo ImageNet normalization for a NumPy image."""
+    mean = np.array(mean).reshape(1, 1, 3)
+    std = np.array(std).reshape(1, 1, 3)
+    img_np = img_np * std + mean
+    return np.clip(img_np, 0, 1)
 
 
 def show_cam_on_image(img: np.ndarray,
