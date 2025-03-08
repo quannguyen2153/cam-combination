@@ -18,7 +18,7 @@ class FullUnifiedCAM(BaseCAM):
             
             target_layers = find_layer_predicate_recursive(model, layer_with_2D_bias)
             
-            print(f"INFO: {len(target_layers)} bias layers will be accounted for.")
+            print(f"INFO: {len(target_layers)} layers will be accounted for.")
 
         super(FullUnifiedCAM, self).__init__(model=model, target_layers=target_layers, reshape_transform=reshape_transform, compute_input_gradient=True)
 
@@ -26,6 +26,9 @@ class FullUnifiedCAM(BaseCAM):
         self, input_tensor: torch.Tensor, targets: List[torch.nn.Module], eigen_smooth: bool = False
     ) -> np.ndarray:
         input_tensor = input_tensor.to(self.device)
+
+        if self.compute_input_gradient:
+            input_tensor = torch.autograd.Variable(input_tensor, requires_grad=True)
 
         self.outputs = outputs = self.activations_and_grads(input_tensor)
         self.activations_and_grads.release() # Release hooks to avoid accumulating memory size when computing
@@ -61,6 +64,13 @@ class FullUnifiedCAM(BaseCAM):
             upsample = torch.nn.UpsamplingBilinear2d(size=input_tensor.shape[-2:])
             activation_feature_maps = upsample(modified_activations)
 
+            # Compute input feature map
+            target_size = self.get_target_width_height(input_tensor)
+            input_grad = input_tensor.grad.data.cpu().numpy()
+            gradient_multiplied_input = input_grad * input_tensor.data.cpu().numpy()
+            gradient_multiplied_input = np.abs(gradient_multiplied_input)
+            input_feature_map = torch.from_numpy(scale_accross_batch_and_channels(gradient_multiplied_input, target_size)).to(self.device)
+
             # Extract biases
             try:
                 if isinstance(target_layer, torch.nn.BatchNorm2d):
@@ -76,10 +86,10 @@ class FullUnifiedCAM(BaseCAM):
 
             # Compute bias feature maps
             gradient_multiplied_biases = np.abs(biases.cpu().numpy() * layer_grads)
-            bias_feature_maps = torch.from_numpy(scale_accross_batch_and_channels(gradient_multiplied_biases, self.get_target_width_height(input_tensor))).to(self.device)
+            bias_feature_maps = torch.from_numpy(scale_accross_batch_and_channels(gradient_multiplied_biases, target_size)).to(self.device)
 
             # Concantenate feature maps
-            feature_maps = torch.cat([activation_feature_maps, bias_feature_maps], dim=1)
+            feature_maps = torch.cat([activation_feature_maps, input_feature_map, bias_feature_maps], dim=1)
 
             # Normalize feature maps
             maxs = feature_maps.view(feature_maps.size(0),
